@@ -1,0 +1,112 @@
+# Pipeline CI của đồ án NT548 (khung, xem docs/00-tong-quan.md mục 5.3)
+# Chủ sở hữu: Thuận. TV1, TV2 chỉ sửa trong khối có tên mình, và sửa qua PR.
+# Trạng thái hiện tại: test + build chạy thật; các phần còn lại là chỗ chờ (placeholder).
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-1
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ===== [Thuận] Chạy unit test + đo coverage cho từng service =====
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, api]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Cài thư viện
+        run: pip install -r services/${{ matrix.service }}/requirements.txt -r services/${{ matrix.service }}/requirements-dev.txt
+      - name: Chạy test + coverage
+        run: pytest services/${{ matrix.service }} --cov=services/${{ matrix.service }} --cov-report=xml:coverage-${{ matrix.service }}.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: coverage-${{ matrix.service }}.xml
+
+  # ===== [TV1] BẮT ĐẦU: job sonar (xem docs/team/01-TV1-DEVSECOPS-SONAR-TRIVY.md) =====
+  sonar:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Chỗ chờ - TV1 thay bằng SonarCloud scan + Quality Gate"
+  # ===== [TV1] KẾT THÚC =====
+
+  # ===== [Thuận] Build image multi-stage; bước Trivy là của [TV1] =====
+  build-scan-push:
+    needs: sonar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # cần cho OIDC (dùng khi bật bước push ECR)
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [frontend, api]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (multi-stage)
+        run: docker build -t local/${{ matrix.service }}:${{ github.sha }} services/${{ matrix.service }}
+      - name: Kiểm tra image (kích thước, user chạy)
+        run: |
+          docker image ls local/${{ matrix.service }}
+          docker run --rm --entrypoint id local/${{ matrix.service }}:${{ github.sha }}
+
+      # --- [TV1] Bỏ comment khi đã có .github/actions/trivy-scan ---
+      # - uses: ./.github/actions/trivy-scan
+      #   with:
+      #     image-ref: local/${{ matrix.service }}:${{ github.sha }}
+      #     service: ${{ matrix.service }}
+      # - if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: report-trivy-${{ matrix.service }}
+      #     path: reports/trivy-${{ matrix.service }}.json
+      #     if-no-files-found: ignore
+
+      # --- [Thuận] Bỏ comment khi đã có stack nt548-iam (secret AWS_ROLE_ARN) và nt548-ecr ---
+      # - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: ${{ env.AWS_REGION }}
+      # - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      #   id: ecr
+      #   uses: aws-actions/amazon-ecr-login@v2
+      # - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      #   run: |
+      #     IMAGE=${{ steps.ecr.outputs.registry }}/nt548/${{ matrix.service }}:${{ github.sha }}
+      #     docker tag local/${{ matrix.service }}:${{ github.sha }} "$IMAGE"
+      #     docker push "$IMAGE"
+
+  # ===== [TV2] BẮT ĐẦU: job ai-report (xem docs/team/02-TV2-AI-SECURITY-ANALYZER.md) =====
+  ai-report:
+    needs: [sonar, build-scan-push]
+    if: always()
+    runs-on: ubuntu-latest
+    continue-on-error: true    # AI lỗi cũng không làm đỏ pipeline
+    steps:
+      - run: echo "Chỗ chờ - TV2 thay bằng AI Security Analyzer"
+  # ===== [TV2] KẾT THÚC =====
+
+  # ===== [Thuận] Cập nhật image tag trong repo nt548-gitops (bật khi đã có ECR + ArgoCD) =====
+  # update-gitops:
+  #   needs: build-scan-push
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: echo "Checkout nt548-gitops bằng GITOPS_TOKEN → kustomize edit set image → commit, push"

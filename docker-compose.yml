@@ -1,0 +1,29 @@
+# Chạy cả 3 service ở máy local để kiểm tra trước khi lên AWS:
+#   docker compose up --build      → mở http://localhost:8080
+#   docker compose down            → dừng và xóa container
+services:
+  redis:
+    image: redis:7.4-alpine          # ghim phiên bản, không dùng latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  api:
+    build: ./services/api
+    environment:
+      REDIS_HOST: redis              # "redis" = tên service ở trên, Docker tự phân giải DNS
+      APP_VERSION: local
+    depends_on:
+      redis:
+        condition: service_healthy   # chờ Redis sẵn sàng rồi mới chạy api
+
+  frontend:
+    build: ./services/frontend
+    environment:
+      API_URL: http://api:5000
+      APP_VERSION: local
+    ports:
+      - "8080:8080"                  # chỉ frontend mở ra máy host; api và redis chỉ nói chuyện nội bộ
+    depends_on:
+      - api
