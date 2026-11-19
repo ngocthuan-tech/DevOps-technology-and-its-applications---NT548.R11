@@ -170,12 +170,12 @@ jobs:
       matrix:
         service: [frontend, api]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - run: pip install -r services/${{ matrix.service }}/requirements.txt -r services/${{ matrix.service }}/requirements-dev.txt
       - run: pytest services/${{ matrix.service }} --cov=services/${{ matrix.service }} --cov-report=xml:coverage-${{ matrix.service }}.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.service }}
           path: coverage-${{ matrix.service }}.xml
@@ -200,7 +200,7 @@ jobs:
       matrix:
         service: [frontend, api]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build image (multi-stage)
         run: docker build -t local/${{ matrix.service }}:${{ github.sha }} services/${{ matrix.service }}
       # --- [TV1] ---
@@ -209,7 +209,7 @@ jobs:
           image-ref: local/${{ matrix.service }}:${{ github.sha }}
           service: ${{ matrix.service }}
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-trivy-${{ matrix.service }}
           path: reports/trivy-${{ matrix.service }}.json

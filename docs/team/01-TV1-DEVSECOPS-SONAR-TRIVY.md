@@ -127,10 +127,10 @@ Thay khối `[TV1]` trong khung ở file 00. Phiên bản action phải **ghim t
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0              # Sonar cần lịch sử git để biết đâu là "code mới"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           merge-multiple: true        # đặt coverage-frontend.xml, coverage-api.xml ở thư mục gốc
@@ -164,7 +164,7 @@ Thay khối `[TV1]` trong khung ở file 00. Phiên bản action phải **ghim t
             -o reports/sonar-qualitygate.json || echo '{}' > reports/sonar-qualitygate.json
 
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: report-sonar          # BẮT BUỘC đúng tên này (tiền tố report-)
           path: reports/sonar-*.json

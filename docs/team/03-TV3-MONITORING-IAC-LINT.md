@@ -294,8 +294,8 @@ jobs:
   cfn-lint:                       # CỔNG CHẶN: template sai thì đỏ
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install "cfn-lint==<GHIM_PHIEN_BAN>"
       - name: Kiểm tra cú pháp và thuộc tính template
@@ -304,8 +304,8 @@ jobs:
   checkov:                        # CHỈ CẢNH BÁO: không chặn
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install "checkov==<GHIM_PHIEN_BAN>"
       - name: Quét cấu hình bảo mật

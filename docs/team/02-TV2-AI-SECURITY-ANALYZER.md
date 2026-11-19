@@ -214,11 +214,11 @@ Thay khối `[TV2]` trong khung ở file 00:
       contents: read
       pull-requests: write            # để comment vào PR
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install -r ai-analyzer/requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: report-*           # report-sonar, report-trivy-frontend, report-trivy-api
           merge-multiple: true
@@ -237,7 +237,7 @@ Thay khối `[TV2]` trong khung ở file 00:
         run: |
           gh pr comment ${{ github.event.pull_request.number }} --edit-last --body-file reports/ai-security-report.md \
           || gh pr comment ${{ github.event.pull_request.number }} --body-file reports/ai-security-report.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ai-security-report    # KHÔNG có tiền tố report- để không lẫn với dữ liệu đầu vào
           path: reports/ai-security-report.md
