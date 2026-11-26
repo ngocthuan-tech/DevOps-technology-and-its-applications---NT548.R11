@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  NT548 - Stack 4/4 (nt548-eks): EKS cluster + Managed Node Group 2 x t3.medium ở private subnet,
+  phân quyền kubectl bằng EKS Access Entry. Stack TỐN TIỀN NHẤT – xóa sau mỗi phiên.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548
+  ClusterName:
+    Type: String
+    Default: nt548-eks
+  KubernetesVersion:
+    Type: String
+    Default: ""
+    Description: >
+      Để trống = EKS dùng phiên bản mặc định (mới). Nếu điền, chọn bản còn STANDARD support:
+      aws eks describe-cluster-versions --region ap-southeast-1
+  NodeInstanceType:
+    Type: String
+    Default: t3.medium
+  PublicAccessCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Dải IP được gọi API Kubernetes (kubectl). Chặt hơn thì điền <IP của bạn>/32
+  Tv3UserArn:
+    Type: String
+    Default: arn:aws:iam::203535410469:user/nt548-tv3
+    Description: IAM user được cấp quyền kubectl mức "edit". Để trống nếu không cần.
+
+Conditions:
+  HasVersion: !Not [!Equals [!Ref KubernetesVersion, ""]]
+  HasTv3: !Not [!Equals [!Ref Tv3UserArn, ""]]
+
+Resources:
+  # ---------- Control plane (AWS vận hành, ta trả $0.10/giờ) ----------
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      Version: !If [HasVersion, !Ref KubernetesVersion, !Ref AWS::NoValue]
+      RoleArn: !ImportValue
+        Fn::Sub: "${ProjectName}-EksClusterRoleArn"
+      ResourcesVpcConfig:
+        SubnetIds: !Split
+          - ","
+          - !Join
+            - ","
+            - - !ImportValue { "Fn::Sub": "${ProjectName}-PrivateSubnetIds" }
+              - !ImportValue { "Fn::Sub": "${ProjectName}-PublicSubnetIds" }
+        EndpointPublicAccess: true       # kubectl từ máy sinh viên
+        EndpointPrivateAccess: true      # node trong VPC gọi API qua đường nội bộ
+        PublicAccessCidrs:
+          - !Ref PublicAccessCidr
+      AccessConfig:
+        AuthenticationMode: API          # phân quyền bằng Access Entry (không dùng aws-auth ConfigMap cũ)
+        BootstrapClusterCreatorAdminPermissions: true   # người tạo stack (a-admins) là admin cluster
+      UpgradePolicy:
+        SupportType: STANDARD            # CHỐNG BẪY GIÁ: không rơi vào Extended Support ($0.60/giờ)
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------- Worker node (EC2 do AWS quản lý vòng đời) ----------
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref Cluster
+      NodegroupName: !Sub "${ProjectName}-nodes"
+      NodeRole: !ImportValue
+        Fn::Sub: "${ProjectName}-EksNodeRoleArn"
+      Subnets: !Split                    # CHỈ private subnet → node không có IP public
+        - ","
+        - !ImportValue
+          Fn::Sub: "${ProjectName}-PrivateSubnetIds"
+      AmiType: AL2023_x86_64_STANDARD    # Amazon Linux 2023 (AL2 đã ngừng cho các bản Kubernetes mới)
+      CapacityType: ON_DEMAND
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      DiskSize: 20
+      ScalingConfig:
+        MinSize: 2
+        DesiredSize: 2
+        MaxSize: 3
+      UpdateConfig:
+        MaxUnavailable: 1
+      Labels:
+        project: !Ref ProjectName
+      Tags:
+        Project: !Ref ProjectName
+
+  # ---------- Quyền kubectl cho TV3 (least privilege: "edit", không phải admin) ----------
+  Tv3AccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Condition: HasTv3
+    Properties:
+      ClusterName: !Ref Cluster
+      PrincipalArn: !Ref Tv3UserArn
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+          AccessScope:
+            Type: cluster
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+  ClusterEndpoint:
+    Value: !GetAtt Cluster.Endpoint
+  KubeconfigCommand:
+    Value: !Sub "aws eks update-kubeconfig --region ${AWS::Region} --name ${Cluster}"

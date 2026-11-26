@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  NT548 - Stack 2/4 (nt548-iam): IAM Role cho EKS control plane, cho worker node,
+  và cho GitHub Actions (đăng nhập bằng OIDC, chỉ được push 2 repo ECR).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548
+  GitHubRepo:
+    Type: String
+    Default: ngocthuan-tech/DevOps-technology-and-its-applications---NT548.R11
+    Description: owner/repo được phép nhận role (phải ĐÚNG chữ hoa/thường)
+  GitHubBranch:
+    Type: String
+    Default: main
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: >
+      Mỗi tài khoản AWS chỉ có 1 OIDC provider cho GitHub. Nếu tài khoản đã có sẵn
+      (IAM > Identity providers > token.actions.githubusercontent.com) thì đặt "false"
+      và điền ExistingOidcProviderArn.
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ""
+
+Conditions:
+  ShouldCreateOidc: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  # ---------- OIDC: AWS tin token do GitHub Actions phát hành ----------
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:                               # AWS hiện tự xác minh GitHub, giữ để tương thích
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------- Role cho EKS control plane ----------
+  EksClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-eks-cluster-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: eks.amazonaws.com }   # chỉ dịch vụ EKS được nhận role này
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------- Role cho worker node (EC2) ----------
+  EksNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-eks-node-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:                                  # 3 policy TỐI THIỂU cho node:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy           # node đăng ký vào cluster
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy                # cấp IP VPC cho Pod
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly  # kéo image từ ECR (chỉ đọc)
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------- Role cho GitHub Actions (OIDC, không dùng access key) ----------
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-actions-ecr"
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If [ShouldCreateOidc, !Ref GitHubOidcProvider, !Ref ExistingOidcProviderArn]
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                # Token phải dành cho AWS STS
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # CHỈ đúng repo này, đúng nhánh main mới nhận được role → PR/fork không push được
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+      Policies:
+        - PolicyName: ecr-push-nt548-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrLogin                     # lấy token đăng nhập ECR (API này không giới hạn theo repo được)
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PushOnlyNt548Repos           # LEAST PRIVILEGE: chỉ push vào nt548/frontend, nt548/api
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}/*"
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+Outputs:
+  EksClusterRoleArn:
+    Value: !GetAtt EksClusterRole.Arn
+    Export: { Name: !Sub "${ProjectName}-EksClusterRoleArn" }
+  EksNodeRoleArn:
+    Value: !GetAtt EksNodeRole.Arn
+    Export: { Name: !Sub "${ProjectName}-EksNodeRoleArn" }
+  GitHubActionsRoleArn:
+    Description: Dán giá trị này vào GitHub secret AWS_ROLE_ARN
+    Value: !GetAtt GitHubActionsRole.Arn

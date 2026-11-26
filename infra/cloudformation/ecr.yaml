@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  NT548 - Stack 3/4 (nt548-ecr): 2 repository ECR (nt548/frontend, nt548/api).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548
+
+Resources:
+  FrontendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}/frontend"
+      ImageTagMutability: IMMUTABLE      # tag (commit SHA) đã push thì không ghi đè được → truy vết chắc chắn
+      ImageScanningConfiguration:
+        ScanOnPush: true                 # quét CVE cơ bản của AWS (miễn phí) – lớp bảo vệ thứ 2 sau Trivy
+      EmptyOnDelete: true                # xóa stack thì xóa luôn image, không bị kẹt DELETE_FAILED
+      LifecyclePolicy:                   # chỉ giữ 10 image gần nhất → không tốn phí lưu trữ
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Giu 10 image gan nhat",
+          "selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},
+          "action":{"type":"expire"}}]}
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  ApiRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}/api"
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EmptyOnDelete: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Giu 10 image gan nhat",
+          "selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},
+          "action":{"type":"expire"}}]}
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+Outputs:
+  FrontendRepositoryUri:
+    Value: !GetAtt FrontendRepository.RepositoryUri
+  ApiRepositoryUri:
+    Value: !GetAtt ApiRepository.RepositoryUri
+  RegistryUri:
+    Description: Dán giá trị này vào GitHub variable ECR_REGISTRY
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com"
